@@ -149,6 +149,10 @@ Bot commands:
 
 ---
 
+## Disclaimer
+
+This is a personal hobby project, shared as-is for anyone who finds it useful. It is **not** production-ready software and comes with no guarantees of reliability, security, or fitness for any particular purpose. Use it at your own risk. The author is not responsible for any damage, data loss, security incidents, or other consequences arising from the use of this project.
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE). The license explicitly provides the software *"as is, without warranty of any kind"* and excludes the author from any liability, which reflects the hobby nature of this project.

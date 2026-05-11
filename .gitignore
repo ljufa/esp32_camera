@@ -1,0 +1,9 @@
+firmware/build
+firmware/managed_components
+firmware/.cache
+firmware/sdkconfig
+firmware/sdkconfig.old
+
+server/frames
+server/target
+server/.env

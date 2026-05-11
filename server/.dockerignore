@@ -1,0 +1,7 @@
+**
+!Cargo.toml
+!Cargo.lock
+!src/**
+!target/release/esp32-camera-server
+!cleanup.sh
+!entrypoint.sh

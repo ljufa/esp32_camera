@@ -1,0 +1,68 @@
+services:
+  camera-server:
+    build: .
+    environment:
+      - SERVER_BIND_ADDRESS=0.0.0.0:8080
+      - RUST_LOG=esp32_camera_server=info,tower_http=info
+      - SAVE_DIR=/frames
+      - DB_DIR=/db
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - MOTION_TIMEOUT_MS=10000
+      - PIXEL_THRESHOLD=80
+      - MOTION_CHECK_EVERY=5
+      - MOTION_PERCENT=3.0
+      - RETAIN_DAYS=3
+      - CLEANUP_CRON=*/20 * * * *
+    volumes:
+      - ./frames:/frames
+      - camera-db:/db
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/status.json"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.camerastream.basicauth.users=${TRAEFIK_BASIC_AUTH_USERS}"
+      - "traefik.http.middlewares.cameraui.basicauth.users=${TRAEFIK_UI_BASIC_AUTH_USERS}"
+      - "traefik.http.routers.camera.rule=Host(`${TRAEFIK_HOST}`)"
+      - "traefik.http.routers.camera.entrypoints=websecure"
+      - "traefik.http.routers.camera.tls.certresolver=cameradnschallenge"
+      - "traefik.http.services.camera.loadbalancer.server.port=8080"
+      - "traefik.http.routers.camera.middlewares=cameraui"
+      - "traefik.http.routers.camera-upload.rule=Host(`${TRAEFIK_HOST}`) && PathPrefix(`/upload`)"
+      - "traefik.http.routers.camera-upload.entrypoints=web"
+      - "traefik.http.routers.camera-upload.middlewares=camerastream"
+      - "traefik.http.routers.camera-upload.service=camera"
+
+  filebrowser:
+    image: filebrowser/filebrowser:latest
+    container_name: filebrowser
+    environment:
+      - FB_BASE_URL=/fb
+      - FB_NOAUTH=true
+    volumes:
+      - ./frames:/srv
+      - filebrowser-data:/config
+      - filebrowser-data:/database
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.filebrowser.rule=Host(`${TRAEFIK_HOST}`) && PathPrefix(`/fb`)"
+      - "traefik.http.routers.filebrowser.entrypoints=websecure"
+      - "traefik.http.routers.filebrowser.tls.certresolver=cameradnschallenge"
+      - "traefik.http.services.filebrowser.loadbalancer.server.port=80"
+      - "traefik.http.routers.filebrowser.middlewares=cameraui"
+
+volumes:
+  camera-db:
+  filebrowser-data:
+
+networks:
+  default:
+    external:
+      name: proxy

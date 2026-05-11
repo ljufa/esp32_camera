@@ -1,0 +1,173 @@
+menu "Security Camera Configuration"
+
+    menu "Device Identity"
+        config BOARD_TYPE
+            string "Board type identifier"
+            default "esp32cam"
+            help
+                Short board name baked into the device ID. Examples:
+                "esp32cam", "esp32s3-usbc", "esp32cam-pir".
+
+                The full device ID assembled at boot is:
+                    <board>-<mac6>-<fwver>
+                e.g. "esp32cam-a1b2c3-0.2.0", where mac6 is the last
+                3 bytes of the factory eFuse MAC and fwver comes from
+                PROJECT_VER in CMakeLists.txt.
+    endmenu
+
+    menu "Status LED"
+        config STATUS_LED_ENABLE
+            bool "Enable flash LED when capture is active"
+            default y
+
+        config STATUS_LED_GPIO
+            int "On-board LED GPIO pin (active HIGH)"
+            default 4
+            depends on STATUS_LED_ENABLE
+            help
+                GPIO4 is the white flash LED on AI-Thinker ESP32-CAM boards.
+                LED turns ON while capturing (PIR-triggered or continuous).
+    endmenu
+
+    menu "PIR Motion Sensor"
+        config PIR_ENABLE
+            bool "Enable PIR motion sensor (disable to stream continuously)"
+            default y
+            help
+                When enabled, the camera only captures while motion is detected.
+                When disabled, the camera streams frames continuously at the
+                configured capture interval.
+
+        config PIR_GPIO
+            int "PIR sensor GPIO pin"
+            default 16
+            depends on PIR_ENABLE
+            help
+                GPIO connected to PIR sensor output (active HIGH).
+                GPIO16 (RXD2) is free on AI-Thinker ESP32-CAM when SD card
+                is not used. Avoid GPIO12/13 (SD DATA2/3 — board pull-ups on
+                those lines conflict with internal pull-downs and disrupt camera DMA).
+
+    endmenu
+
+    menu "WiFi"
+        config WIFI_SSID
+            string "WiFi SSID"
+            default "myssid"
+            help
+                SSID of the WiFi network to connect to.
+
+        config WIFI_PASSWORD
+            string "WiFi Password"
+            default "mypassword"
+            help
+                Password for the WiFi network.
+
+        config WIFI_MAX_RETRIES
+            int "Maximum connection retries"
+            default 5
+            range 1 20
+    endmenu
+
+    menu "HTTP Endpoint"
+        config HTTP_ENDPOINT_URL
+            string "Remote HTTP endpoint base URL"
+            default "http://192.168.1.100:8080/upload"
+            help
+                Base URL for the server upload endpoint. The camera ID is
+                appended automatically: <url>/<camera_id>.
+
+        config HTTP_TIMEOUT_MS
+            int "HTTP request timeout (ms)"
+            default 10000
+            range 1000 60000
+
+        config HTTP_BASIC_AUTH_ENABLE
+            bool "Enable HTTP Basic Authentication"
+            default n
+
+        config HTTP_BASIC_AUTH_USERNAME
+            string "Username"
+            default "camera"
+            depends on HTTP_BASIC_AUTH_ENABLE
+
+        config HTTP_BASIC_AUTH_PASSWORD
+            string "Password"
+            default ""
+            depends on HTTP_BASIC_AUTH_ENABLE
+    endmenu
+
+    menu "Capture"
+        config JPEG_QUALITY
+            int "JPEG quality (lower = better, higher compression)"
+            default 10
+            range 4 63
+    endmenu
+
+    menu "Camera Pins (AI-Thinker ESP32-CAM / OV3660 defaults)"
+        config CAM_PIN_PWDN
+            int "PWDN pin (-1 if unused)"
+            default 32
+
+        config CAM_PIN_RESET
+            int "RESET pin (-1 if unused)"
+            default -1
+
+        config CAM_PIN_XCLK
+            int "XCLK pin"
+            default 0
+
+        config CAM_PIN_SIOD
+            int "SIOD (SDA) pin"
+            default 26
+
+        config CAM_PIN_SIOC
+            int "SIOC (SCL) pin"
+            default 27
+
+        config CAM_PIN_D7
+            int "D7 pin"
+            default 35
+
+        config CAM_PIN_D6
+            int "D6 pin"
+            default 34
+
+        config CAM_PIN_D5
+            int "D5 pin"
+            default 39
+
+        config CAM_PIN_D4
+            int "D4 pin"
+            default 36
+
+        config CAM_PIN_D3
+            int "D3 pin"
+            default 21
+
+        config CAM_PIN_D2
+            int "D2 pin"
+            default 19
+
+        config CAM_PIN_D1
+            int "D1 pin"
+            default 18
+
+        config CAM_PIN_D0
+            int "D0 pin"
+            default 5
+
+        config CAM_PIN_VSYNC
+            int "VSYNC pin"
+            default 25
+
+        config CAM_PIN_HREF
+            int "HREF pin"
+            default 23
+
+        config CAM_PIN_PCLK
+            int "PCLK pin"
+            default 22
+    endmenu
+
+endmenu

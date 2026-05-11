@@ -1,0 +1,12 @@
+[tasks.fix-permissions]
+script = [
+    "sudo chown -R 1000:1000 frames/"
+]
+
+[tasks.redeploy]
+# dependencies = ["fix-permissions"]
+script = [
+    "cargo build --release",
+    "docker-compose build",
+    "docker-compose up -d --remove-orphans"
+]

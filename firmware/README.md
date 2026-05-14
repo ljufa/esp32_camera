@@ -1,11 +1,11 @@
-# ESP32 Security Camera
+# ESP32 Security Camera — Firmware
 
-ESP32-S3 (USB-C) + OV3660 security camera that captures JPEG frames and POSTs them to a configurable HTTP endpoint.
+AI-Thinker ESP32-CAM (original ESP32, OV2640) firmware. Captures JPEG frames and POSTs them to a configurable HTTP endpoint. Supports PIR-triggered capture and OTA firmware updates.
 
 ## Requirements
 
 - ESP-IDF >= 5.0
-- ESP32-S3 board with OV3660 and PSRAM
+- AI-Thinker ESP32-CAM (original ESP32 with PSRAM, OV2640)
 
 ## Quick Start
 
@@ -14,46 +14,42 @@ ESP32-S3 (USB-C) + OV3660 security camera that captures JPEG frames and POSTs th
 ```bash
 idf.py menuconfig
 # → Security Camera Configuration
-#   Set WiFi SSID/password, HTTP endpoint URL, capture interval
+#   Set WiFi SSID/password, HTTP endpoint URL
+#   Set OTA version/firmware URLs
 #   Adjust camera pins if your board differs from defaults
 ```
 
 ### 2. Build & Flash
+
+First flash must be a full flash (writes the OTA partition table):
 
 ```bash
 idf.py build
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
-### 3. Run the test server
-
-```bash
-cd server
-python3 server.py --port 8080 --output ./frames
-```
-
-Set the endpoint URL in menuconfig to `http://<your-pc-ip>:8080/upload`.
+Subsequent updates can be pushed OTA — see the server README.
 
 ## Project Structure
 
 ```
-esp32_camera/
-├── CMakeLists.txt
-├── sdkconfig.defaults       # ESP32-S3 + PSRAM defaults
-├── main/
-│   ├── Kconfig.projbuild    # All runtime config (WiFi, pins, interval, etc.)
-│   ├── idf_component.yml    # Pulls in espressif/esp32-camera via IDF Component Manager
-│   ├── main.c               # Capture loop
-│   ├── camera_init.c/h      # OV3660 init + sensor tweaks
-│   ├── wifi_connect.c/h     # WiFi STA connection with retry
-│   └── http_sender.c/h      # HTTP POST of raw JPEG
-└── server/
-    └── server.py            # Reference receive server
+firmware/
+├── CMakeLists.txt           # PROJECT_VER lives here
+├── sdkconfig.defaults       # ESP32 + PSRAM defaults
+├── partitions.csv           # OTA-aware partition table (ota_0 + ota_1)
+└── main/
+    ├── Kconfig.projbuild    # All runtime config (WiFi, pins, OTA, etc.)
+    ├── idf_component.yml    # Pulls in espressif/esp32-camera
+    ├── main.c               # Capture loop, PIR logic
+    ├── camera_init.c/h      # OV2640 init, sensor tweaks, retry logic
+    ├── wifi_connect.c/h     # WiFi STA with retry
+    ├── http_sender.c/h      # HTTP POST of JPEG frames (keep-alive)
+    ├── ota.c/h              # Poll-on-boot OTA update
+    ├── pir.c/h              # PIR motion sensor
+    └── device_id.c/h        # Stable device ID: <board>-<mac6>
 ```
 
-## Camera Pin Defaults (AI-Thinker ESP32-CAM / OV3660)
-
-Board: original ESP32 (ESP-32S module) with PSRAM64H, USB-C carrier.
+## Camera Pin Defaults (AI-Thinker ESP32-CAM)
 
 | Signal | GPIO |
 |--------|------|
@@ -66,10 +62,46 @@ Board: original ESP32 (ESP-32S module) with PSRAM64H, USB-C carrier.
 | HREF   | 23   |
 | PCLK   | 22   |
 
-These are the standard AI-Thinker ESP32-CAM pin assignments. Override in `menuconfig` if your board differs.
+Override in `menuconfig → Camera Pins` if your board differs.
 
-## Notes
+## Configuration Reference
 
-- PSRAM is required; JPEG format is used to keep memory usage manageable alongside WiFi.
-- The OV3660 is initialized with vertical flip enabled — disable in `camera_init.c` if your image appears correct.
-- The HTTP endpoint stub (`server/server.py`) is intentionally minimal. Replace with your production backend later.
+All options are under `menuconfig → Security Camera Configuration`.
+
+| Section | Key | Default | Description |
+|---------|-----|---------|-------------|
+| Device Identity | `BOARD_TYPE` | `esp32cam` | Board name prefix in device ID |
+| Status LED | `STATUS_LED_ENABLE` | y | Flash LED on GPIO4 while capturing |
+| PIR | `PIR_ENABLE` | y | Trigger capture on motion; disable for continuous |
+| PIR | `PIR_GPIO` | 16 | GPIO connected to PIR output |
+| WiFi | `WIFI_SSID` / `WIFI_PASSWORD` | — | Network credentials |
+| HTTP Endpoint | `HTTP_ENDPOINT_URL` | — | Base URL; camera ID appended automatically |
+| HTTP Endpoint | `HTTP_BASIC_AUTH_ENABLE` | n | Enable Basic Auth on upload |
+| OTA | `OTA_ENABLE` | y | Check for updates on every boot |
+| OTA | `OTA_VERSION_URL` | — | `GET` returns plain-text version string |
+| OTA | `OTA_FIRMWARE_URL` | — | URL of `.bin` to download on update |
+| Capture | `JPEG_QUALITY` | 10 | JPEG quality (lower = better, 4–63) |
+
+## Device ID
+
+Each device identifies itself as `<board>-<mac6>`, e.g. `esp32cam-a1b2c3`, derived from the board type config and the last 3 bytes of the factory eFuse MAC. This ID is stable across firmware updates and is appended to the upload URL: `POST /upload/esp32cam-a1b2c3`.
+
+## OTA Updates
+
+On every boot (after WiFi connects), the firmware GETs `OTA_VERSION_URL`. If the returned version string differs from the running firmware, it downloads `OTA_FIRMWARE_URL`, flashes it, and reboots. On failure it logs the error and continues normally.
+
+See the server README for how to publish a new firmware version.
+
+## Partition Table
+
+Uses an OTA-aware layout with two 1.5 MB app slots:
+
+| Partition | Size |
+|-----------|------|
+| nvs | 20 KB |
+| otadata | 8 KB |
+| ota_0 | 1.5 MB |
+| ota_1 | 1.5 MB |
+| spiffs | 960 KB |
+
+Current binary is ~1 MB, leaving ~512 KB of headroom per slot.

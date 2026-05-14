@@ -8,9 +8,9 @@ A minimal, self-hosted security camera system built around an AI-Thinker ESP32-C
 │                     │                                     │                          │
 │  • OV2640 capture   │                                     │  • Live MJPEG streams    │
 │  • PIR wake-up      │                                     │  • Motion detection      │
-│  • HTTP keep-alive  │                                     │  • MP4 encoding (ffmpeg) │
-└─────────────────────┘                                     │  • Telegram alerts       │
-                                                            │  • Web dashboard         │
+│  • OTA updates      │                                     │  • MP4 encoding (ffmpeg) │
+│  • HTTP keep-alive  │                                     │  • Telegram alerts       │
+└─────────────────────┘                                     │  • Web dashboard         │
                                                             └──────────────────────────┘
 ```
 
@@ -50,9 +50,10 @@ Environment variables (all optional except `SAVE_DIR`):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SAVE_DIR` | required | Directory for saved frames and videos |
-| `DB_DIR` | `/db`      | Camera config database directory |
+| `DB_DIR` | `$SAVE_DIR/db` | Camera config database directory |
+| `FIRMWARE_DIR` | — | Directory served at `/firmware/`; omit to disable OTA |
 | `SERVER_BIND_ADDRESS` | `0.0.0.0:8080` | Listen address |
-| `TELEGRAM_TOKEN` | —  | Bot token; omit to disable notifications |
+| `TELEGRAM_TOKEN` | — | Bot token; omit to disable notifications |
 | `TELEGRAM_CHAT_ID` | — | Chat/group ID for alerts |
 | `MOTION_TIMEOUT_MS` | `60000` | Idle time before a session closes |
 | `PIXEL_THRESHOLD` | `40` | Per-pixel diff threshold (0–255) |
@@ -70,6 +71,8 @@ Environment variables (all optional except `SAVE_DIR`):
 | `GET` | `/status.json` | JSON status for all cameras |
 | `PATCH` | `/api/camera/<id>/config` | Update camera settings |
 | `DELETE` | `/api/camera/<id>` | Remove a camera |
+| `GET` | `/firmware/version` | Current firmware version string (OTA check) |
+| `GET` | `/firmware/<filename>` | Download firmware binary (OTA update) |
 | `GET` | `/swagger-ui` | Interactive API docs |
 
 ### Storage layout
@@ -118,15 +121,38 @@ The compose setup uses two separate Traefik Basic Auth credentials:
 
 | Credential | Variable | Protects | Protocol |
 |------------|----------|----------|----------|
-| `camera_stream` | `TRAEFIK_BASIC_AUTH_USERS` | `POST /upload/*` only | **HTTP** (plain) |
-| `camera_ui` | `TRAEFIK_UI_BASIC_AUTH_USERS` | Everything else (dashboard, streams, API) | **HTTPS** |
+| `camera_stream` | `TRAEFIK_BASIC_AUTH_USERS` | `POST /upload/*` | **HTTP** (plain) |
+| `camera_ui` | `TRAEFIK_UI_BASIC_AUTH_USERS` | Dashboard, streams, API | **HTTPS** |
+| *(none)* | — | `GET /firmware/*` | **HTTP** (plain) |
 
-The upload route is intentionally HTTP-only — skipping TLS cuts latency for high-frequency JPEG POSTs from the firmware. Everything the browser touches goes over HTTPS.
+The upload and firmware routes are intentionally HTTP-only — skipping TLS cuts latency for high-frequency JPEG POSTs and avoids auth complexity for OTA on the device side. Everything the browser touches goes over HTTPS.
 
 Generate each password hash with:
 ```bash
 echo $(htpasswd -nb put_your_username_here put_your_password_here) | sed -e s/\\$/\\$\\$/g
 ```
+
+### OTA firmware updates
+
+The server serves firmware from `FIRMWARE_DIR` (mounted from `firmware/build/` in the repo). To publish a new version:
+
+```bash
+# 1. Bump PROJECT_VER in firmware/CMakeLists.txt, then build
+cd firmware && idf.py build
+
+# 2. Write version file alongside the binary
+cd ../server && cargo make package-firmware
+
+# 3. Commit and push
+git add ../firmware/build/esp32_security_camera.bin ../firmware/build/version
+git commit -m "firmware 0.x.0"
+git push
+
+# 4. Pull on the server and restart
+git pull && docker compose restart camera-server
+```
+
+Devices check for updates on every boot. If the version file on the server differs from the running firmware, the device downloads the binary, flashes it, and reboots.
 
 ### Motion detection
 

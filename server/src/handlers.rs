@@ -557,3 +557,51 @@ pub async fn handler_delete_camera(
 
     StatusCode::OK
 }
+
+pub async fn handler_firmware_version(State(state): State<AppState>) -> Response {
+    let Some(ref dir) = state.firmware_dir else {
+        return Response::builder()
+            .status(StatusCode::SERVICE_UNAVAILABLE)
+            .body(Body::from("FIRMWARE_DIR not configured"))
+            .unwrap();
+    };
+    match tokio::fs::read_to_string(dir.join("version")).await {
+        Ok(v) => Response::builder()
+            .header(header::CONTENT_TYPE, "text/plain")
+            .body(Body::from(v.trim().to_string()))
+            .unwrap(),
+        Err(_) => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::empty())
+            .unwrap(),
+    }
+}
+
+pub async fn handler_firmware_binary(
+    State(state): State<AppState>,
+    Path(filename): Path<String>,
+) -> Response {
+    let Some(ref dir) = state.firmware_dir else {
+        return Response::builder()
+            .status(StatusCode::SERVICE_UNAVAILABLE)
+            .body(Body::from("FIRMWARE_DIR not configured"))
+            .unwrap();
+    };
+    if filename.contains('/') || filename.contains('\\') || filename.starts_with('.') {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::empty())
+            .unwrap();
+    }
+    match tokio::fs::read(dir.join(&filename)).await {
+        Ok(data) => Response::builder()
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .header(header::CONTENT_LENGTH, data.len())
+            .body(Body::from(data))
+            .unwrap(),
+        Err(_) => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::empty())
+            .unwrap(),
+    }
+}

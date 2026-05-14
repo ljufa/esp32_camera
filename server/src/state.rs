@@ -45,6 +45,7 @@ pub struct CameraState {
 pub struct AppState {
     pub cameras: Arc<RwLock<HashMap<String, CameraState>>>,
     pub save_dir: std::path::PathBuf,
+    pub firmware_dir: Option<std::path::PathBuf>,
     pub telegram_token: Option<String>,
     pub telegram_chat_id: Option<String>,
     pub db: Arc<Db>,

@@ -4,6 +4,7 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sensor.h"
 
 static const char *TAG = "camera";
 
@@ -69,14 +70,14 @@ static esp_err_t camera_init_once(void)
         .pin_href       = CONFIG_CAM_PIN_HREF,
         .pin_pclk       = CONFIG_CAM_PIN_PCLK,
 
-        .xclk_freq_hz   = 10000000,
+        .xclk_freq_hz   = 20000000,
         .ledc_timer     = LEDC_TIMER_0,
         .ledc_channel   = LEDC_CHANNEL_0,
 
         .pixel_format   = PIXFORMAT_JPEG,
-        .frame_size     = FRAMESIZE_SVGA,
+        .frame_size     = FRAMESIZE_XGA,
         .jpeg_quality   = CONFIG_JPEG_QUALITY,
-        .fb_count       = 4,
+        .fb_count       = 2,
         .fb_location    = CAMERA_FB_IN_PSRAM,
         .grab_mode      = CAMERA_GRAB_LATEST,
     };
@@ -100,6 +101,12 @@ esp_err_t camera_init(void)
                 sensor->set_vflip(sensor, 1);
                 sensor->set_brightness(sensor, 1);
                 sensor->set_saturation(sensor, -2);
+                sensor->set_sharpness(sensor, 1);
+                sensor->set_denoise(sensor, 1);
+                sensor->set_bpc(sensor, 1);
+                sensor->set_wpc(sensor, 1);
+                sensor->set_lenc(sensor, 1);
+                sensor->set_raw_gma(sensor, 1);                
             }
             ESP_LOGI(TAG, "Camera ready (attempt %d)", attempt);
             return ESP_OK;

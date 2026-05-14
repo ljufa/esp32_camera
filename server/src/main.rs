@@ -67,12 +67,20 @@ async fn main() {
         camera_map.insert(id, CameraState::new(cfg));
     }
 
+    let firmware_dir = std::env::var("FIRMWARE_DIR").ok().map(|d| {
+        let path = std::path::PathBuf::from(d);
+        std::fs::create_dir_all(&path).expect("Failed to create FIRMWARE_DIR");
+        info!("Serving firmware from {}", path.display());
+        path
+    });
+
     let telegram_token = std::env::var("TELEGRAM_TOKEN").ok();
     let telegram_chat_id = std::env::var("TELEGRAM_CHAT_ID").ok();
 
     let state = AppState {
         cameras: Arc::new(tokio::sync::RwLock::new(camera_map)),
         save_dir,
+        firmware_dir,
         telegram_token: telegram_token.clone(),
         telegram_chat_id: telegram_chat_id.clone(),
         db,
@@ -94,6 +102,8 @@ async fn main() {
         .route("/upload/:camera_id", post(handlers::handler_upload))
         .route("/api/camera/:camera_id/config", patch(handlers::handler_update_config))
         .route("/api/camera/:camera_id", delete(handlers::handler_delete_camera))
+        .route("/firmware/version", get(handlers::handler_firmware_version))
+        .route("/firmware/:filename", get(handlers::handler_firmware_binary))
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())

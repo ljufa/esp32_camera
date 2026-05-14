@@ -6,9 +6,10 @@ idf_component_register(
         "http_sender.c"
         "pir.c"
         "device_id.c"
+        "ota.c"
     INCLUDE_DIRS "."
     REQUIRES
-esp_wifi
+        esp_wifi
         esp_event
         esp_netif
         nvs_flash
@@ -17,4 +18,6 @@ esp_wifi
         mbedtls
         esp_driver_gpio
         esp_app_format
+        app_update
+        esp_https_ota
 )

@@ -1,11 +1,13 @@
 services:
   camera-server:
     build: .
+    user: "1000:1000"
     environment:
       - SERVER_BIND_ADDRESS=0.0.0.0:8080
       - RUST_LOG=esp32_camera_server=info,tower_http=info
       - SAVE_DIR=/frames
       - DB_DIR=/db
+      - FIRMWARE_DIR=/firmware
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - MOTION_TIMEOUT_MS=10000
@@ -16,6 +18,7 @@ services:
       - CLEANUP_CRON=*/20 * * * *
     volumes:
       - ./frames:/frames
+      - ../firmware/build:/firmware:ro
       - camera-db:/db
       - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
@@ -38,10 +41,14 @@ services:
       - "traefik.http.routers.camera-upload.entrypoints=web"
       - "traefik.http.routers.camera-upload.middlewares=camerastream"
       - "traefik.http.routers.camera-upload.service=camera"
+      - "traefik.http.routers.camera-firmware.rule=Host(`${TRAEFIK_HOST}`) && PathPrefix(`/firmware`)"
+      - "traefik.http.routers.camera-firmware.entrypoints=web"
+      - "traefik.http.routers.camera-firmware.service=camera"
 
   filebrowser:
     image: filebrowser/filebrowser:latest
     container_name: filebrowser
+    user: "1000:1000"
     environment:
       - FB_BASE_URL=/fb
       - FB_NOAUTH=true

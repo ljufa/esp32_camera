@@ -97,6 +97,28 @@ menu "Security Camera Configuration"
             depends on HTTP_BASIC_AUTH_ENABLE
     endmenu
 
+    menu "OTA Updates"
+        config OTA_ENABLE
+            bool "Enable OTA firmware updates on boot"
+            default y
+
+        config OTA_VERSION_URL
+            string "Version check URL"
+            default "http://192.168.1.100:8080/firmware/version"
+            depends on OTA_ENABLE
+            help
+                GET this URL on boot. Server must return a plain-text version
+                string (e.g. "0.3.0"). If it differs from the running firmware,
+                the binary is downloaded and flashed.
+
+        config OTA_FIRMWARE_URL
+            string "Firmware binary URL"
+            default "http://192.168.1.100:8080/firmware/esp32_security_camera.bin"
+            depends on OTA_ENABLE
+            help
+                URL of the firmware .bin file to download when an update is available.
+    endmenu
+
     menu "Capture"
         config JPEG_QUALITY
             int "JPEG quality (lower = better, higher compression)"

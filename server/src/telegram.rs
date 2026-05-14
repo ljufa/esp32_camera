@@ -14,7 +14,10 @@ pub async fn send_telegram_notification(
 ) {
     let client = reqwest::Client::new();
 
-    let caption = format!("\u{26a0}\u{fe0f} <b>Motion on {display_name}</b>");
+    let caption = format!(
+        "\u{26a0}\u{fe0f} <b>Motion on {}</b>\n\n<a href=\"https://stream.dlj.freemyip.com\">\u{1f510} Open stream</a>",
+        display_name,
+    );
 
     let photo_part = reqwest::multipart::Part::bytes(frame.to_vec())
         .file_name("motion.jpg")

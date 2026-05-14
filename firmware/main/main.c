@@ -10,6 +10,7 @@
 #include "http_sender.h"
 #include "pir.h"
 #include "device_id.h"
+#include "ota.h"
 
 static const char *TAG = "main";
 static const char *TAG_PIR = "pir_state";
@@ -101,6 +102,7 @@ void app_main(void)
 
     led_init();
     ESP_ERROR_CHECK(wifi_connect());
+    ota_check_and_update();
     vTaskDelay(pdMS_TO_TICKS(500));
     ESP_ERROR_CHECK(camera_init());
 

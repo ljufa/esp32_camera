@@ -3,8 +3,17 @@ script = [
     "sudo chown -R 1000:1000 frames/"
 ]
 
+[tasks.package-firmware]
+description = "Write version file into firmware/build/ so it can be committed alongside the binary"
+script = [
+    "VER=$(grep 'set(PROJECT_VER' ../firmware/CMakeLists.txt | sed 's/.*\"\\(.*\\)\".*/\\1/')",
+    "printf '%s' \"$VER\" > ../firmware/build/version",
+    "echo \"Packaged firmware $VER\""
+]
+
 [tasks.redeploy]
 # dependencies = ["fix-permissions"]
+dependencies = ["package-firmware"]
 script = [
     "cargo build --release",
     "docker-compose build",

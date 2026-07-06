@@ -12,6 +12,12 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+# Allocate TLS I/O buffers on demand and size them to the actual records
+# instead of a fixed 16 KB each — keeps HTTPS affordable on the RAM-tight
+# original ESP32. Deliberately NOT freeing the CA/config data after the
+# handshake (MBEDTLS_DYNAMIC_FREE_CONFIG_DATA): the upload stream reconnects
+# on failure, and freeing would require re-registering the cert each time.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 
 # WiFi
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4

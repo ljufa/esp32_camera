@@ -38,19 +38,21 @@ services:
       - "traefik.http.routers.camera.tls.certresolver=cameradnschallenge"
       - "traefik.http.services.camera.loadbalancer.server.port=8080"
       - "traefik.http.routers.camera.middlewares=cameraui"
-      # NOTE: firmware >= v5 uploads via one endless chunked POST. Traefik's
-      # entrypoint readTimeout (60s default in v3) must be 0 on this
-      # entrypoint or every stream is cut after a minute:
-      #   --entrypoints.web.transport.respondingTimeouts.readTimeout=0s
-      # Never add a buffering middleware to this router.
-      - "traefik.http.routers.camera-upload.rule=Host(`${TRAEFIK_HOST}`) && PathPrefix(`/upload`)"
-      - "traefik.http.routers.camera-upload.entrypoints=web"
-      - "traefik.http.routers.camera-upload.middlewares=camerastream"
-      - "traefik.http.routers.camera-upload.service=camera"
-      - "traefik.http.routers.camera-firmware.rule=Host(`${TRAEFIK_HOST}`) && PathPrefix(`/firmware`)"
-      - "traefik.http.routers.camera-firmware.entrypoints=web"
-      - "traefik.http.routers.camera-firmware.middlewares=cameraota"
-      - "traefik.http.routers.camera-firmware.service=camera"
+      # Uploads/OTA run over HTTPS (443) as of firmware v9 so video frames
+      # and the basic-auth credential are never sent in clear. Frames stream
+      # as one endless chunked POST, so the websecure entrypoint needs
+      # readTimeout=0s (set in traefik_config.yaml). Never add a buffering
+      # middleware to these routers — it would hold the infinite stream.
+      - "traefik.http.routers.camera-upload-tls.rule=Host(`${TRAEFIK_HOST}`) && PathPrefix(`/upload`)"
+      - "traefik.http.routers.camera-upload-tls.entrypoints=websecure"
+      - "traefik.http.routers.camera-upload-tls.tls.certresolver=cameradnschallenge"
+      - "traefik.http.routers.camera-upload-tls.middlewares=camerastream"
+      - "traefik.http.routers.camera-upload-tls.service=camera"
+      - "traefik.http.routers.camera-firmware-tls.rule=Host(`${TRAEFIK_HOST}`) && PathPrefix(`/firmware`)"
+      - "traefik.http.routers.camera-firmware-tls.entrypoints=websecure"
+      - "traefik.http.routers.camera-firmware-tls.tls.certresolver=cameradnschallenge"
+      - "traefik.http.routers.camera-firmware-tls.middlewares=cameraota"
+      - "traefik.http.routers.camera-firmware-tls.service=camera"
 
   filebrowser:
     image: filebrowser/filebrowser:latest

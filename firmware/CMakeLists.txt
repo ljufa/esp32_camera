@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-set(PROJECT_VER "8")
+set(PROJECT_VER "10")
 
 # Board is selected with -D CAM_BOARD=<name> (see boards/*.args); the board
 # type string comes from that board's defaults file so the OTA binary name

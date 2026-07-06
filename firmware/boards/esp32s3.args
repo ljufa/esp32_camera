@@ -1,0 +1,4 @@
+-B build.esp32s3
+-D SDKCONFIG=build.esp32s3/sdkconfig
+-D SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.esp32s3
+-D CAM_BOARD=esp32s3

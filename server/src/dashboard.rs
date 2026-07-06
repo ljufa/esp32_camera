@@ -252,6 +252,7 @@ pub const DASHBOARD_HTML: &str = r##"<!DOCTYPE html>
             <div class="cam-footer">
               <span class="viewers" id="viewers-${cam.id}">0 viewers</span>
               <span id="fps-${cam.id}"></span>
+              <span class="viewers" id="fw-${cam.id}" title="installed firmware version"></span>
               <span class="viewer-ips" id="ips-${cam.id}"></span>
               <a href="/stream/${encodeURIComponent(cam.id)}">direct stream</a>
             </div>`;
@@ -301,6 +302,8 @@ pub const DASHBOARD_HTML: &str = r##"<!DOCTYPE html>
         viewersEl.textContent = `${vc} viewer${vc !== 1 ? 's' : ''}`;
         const fpsEl = document.getElementById(`fps-${cam.id}`);
         if (fpsEl) fpsEl.textContent = cam.active && cam.fps > 0 ? `${cam.fps.toFixed(1)} fps` : '';
+        const fwEl = document.getElementById(`fw-${cam.id}`);
+        if (fwEl) fwEl.textContent = cam.fw_version ? `fw v${cam.fw_version}` : '';
         ipsEl.textContent = cam.viewers.length > 0 ? cam.viewers.join(', ') : '';
       }
     }

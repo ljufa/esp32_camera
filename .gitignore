@@ -1,13 +1,12 @@
-firmware/build/*
-!firmware/build/esp32_security_camera.bin
-!firmware/build/version
+firmware/build*/
 server/frames
 server/target
-server/.env
+#server/.env
 
 firmware/managed_components
 firmware/.cache
 firmware/sdkconfig
 firmware/sdkconfig.old
+firmware/*.bak
 
 .idea

@@ -5,7 +5,7 @@ use axum::{
     response::{Html, Json, Response},
 };
 use utoipa::ToSchema;
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures::StreamExt;
 use log::{debug, info, warn};
 use serde::Deserialize;
@@ -58,6 +58,7 @@ pub async fn handler_status(State(state): State<AppState>) -> Json<StatusRespons
             active,
             frame_count: cam.frame_count.load(Ordering::Relaxed),
             fps,
+            fw_version: cam.fw_version.read().await.clone(),
             viewer_count: viewers.len(),
             viewers: viewer_ips,
             motion_enabled: cfg.motion_enabled,
@@ -174,9 +175,11 @@ fn reset_motion_timeout(
     motion.timeout_handle = Some(handle);
 }
 
+/* Legacy one-POST-per-frame upload, kept for firmware < v5. */
 pub async fn handler_upload(
     State(state): State<AppState>,
     Path(camera_id): Path<String>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
     if body.is_empty() {
@@ -184,7 +187,80 @@ pub async fn handler_upload(
     }
 
     let camera = get_or_register_camera(&state, &camera_id).await;
+    record_fw_version(&camera, &headers).await;
+    ingest_frame(&state, &camera, &camera_id, body).await;
+    StatusCode::OK
+}
 
+/* Firmware >= v5: one long-lived chunked POST carrying every frame as a
+   4-byte big-endian length prefix + JPEG. No per-frame response, so upload
+   pace is bounded by bandwidth instead of WAN round trips. */
+pub async fn handler_upload_stream(
+    State(state): State<AppState>,
+    Path(camera_id): Path<String>,
+    headers: HeaderMap,
+    body: Body,
+) -> StatusCode {
+    const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
+    const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(75);
+
+    let camera = get_or_register_camera(&state, &camera_id).await;
+    record_fw_version(&camera, &headers).await;
+    info!("[{camera_id}] upload stream connected");
+
+    let mut stream = body.into_data_stream();
+    let mut buf = BytesMut::new();
+    loop {
+        match tokio::time::timeout(READ_TIMEOUT, stream.next()).await {
+            Err(_) => {
+                warn!("[{camera_id}] upload stream idle for {READ_TIMEOUT:?}, closing");
+                break;
+            }
+            Ok(None) => {
+                info!("[{camera_id}] upload stream ended");
+                break;
+            }
+            Ok(Some(Err(e))) => {
+                warn!("[{camera_id}] upload stream error: {e}");
+                break;
+            }
+            Ok(Some(Ok(chunk))) => {
+                buf.put(chunk);
+                while buf.len() >= 4 {
+                    let frame_len =
+                        u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+                    if frame_len == 0 || frame_len > MAX_FRAME_BYTES {
+                        warn!("[{camera_id}] bad frame length {frame_len}, closing stream");
+                        return StatusCode::BAD_REQUEST;
+                    }
+                    if buf.len() < 4 + frame_len {
+                        break;
+                    }
+                    buf.advance(4);
+                    let frame = buf.split_to(frame_len).freeze();
+                    ingest_frame(&state, &camera, &camera_id, frame).await;
+                }
+            }
+        }
+    }
+    StatusCode::OK
+}
+
+async fn record_fw_version(camera: &CameraState, headers: &HeaderMap) {
+    if let Some(ver) = headers
+        .get("x-firmware-version")
+        .and_then(|v| v.to_str().ok())
+    {
+        let mut fw = camera.fw_version.write().await;
+        if fw.as_deref() != Some(ver) {
+            *fw = Some(ver.to_string());
+        }
+    }
+}
+
+/* Everything that happens to a frame once it's off the wire: stats, motion
+   detection, session saving, live-stream broadcast. */
+async fn ingest_frame(state: &AppState, camera: &CameraState, camera_id: &str, body: Bytes) {
     let now = now_ms();
     let prev_ms = camera.last_frame_ms.load(Ordering::Relaxed);
     camera.last_frame_ms.store(now, Ordering::Relaxed);
@@ -212,107 +288,30 @@ pub async fn handler_upload(
         (do_check, prev)
     };
 
-    let detection = if do_motion_check {
-        let body_for_decode = body.clone();
-        let threshold = cfg.pixel_threshold;
-        let had_prev = prev_gray.is_some();
-        let min_pixels =
-            ((COMPARE_WIDTH * COMPARE_HEIGHT) as f32 * cfg.motion_percent / 100.0) as u32;
-        tokio::task::spawn_blocking(move || {
-            let gray = process_frame(&body_for_decode)?;
-            let changed = match prev_gray {
-                Some(prev) => prev
-                    .iter()
-                    .zip(gray.iter())
-                    .filter(|(a, b)| a.abs_diff(**b) > threshold)
-                    .count() as u32,
-                None => 0,
-            };
-            let detected = had_prev && changed >= min_pixels;
-            Some((gray, changed, detected, min_pixels))
-        })
-        .await
-        .ok()
-        .flatten()
-    } else {
-        None
-    };
-    if do_motion_check && detection.is_none() {
-        debug!("[{camera_id}] failed to decode frame for motion check");
+    /* Run decode + detection off the ingest path so it never delays frame
+       intake. The task re-acquires the motion lock to apply its result. */
+    if do_motion_check {
+        let state = state.clone();
+        let camera = camera.clone();
+        let camera_id = camera_id.to_string();
+        let body = body.clone();
+        tokio::spawn(async move {
+            run_motion_check(state, camera, camera_id, cfg, prev_gray, body, now, n).await;
+        });
     }
 
     let mut motion = camera.motion.write().await;
 
-    let mut need_timeout_reset = false;
-
-    if let Some((gray, changed, detected, min_pixels)) = detection {
-        motion.prev_gray = Some(gray);
-
-        if detected {
-            motion.last_motion_ms = now;
-            if !motion.saving {
-                let now_dt = chrono::Local::now();
-                let date_part = now_dt.format("%d-%m-%Y").to_string();
-                let time_part = now_dt.format("%H-%M-%S").to_string();
-                let session = format!("{date_part}_{time_part}");
-                let display_name = cfg.name.as_deref().unwrap_or(&camera_id);
-                let safe_dir = sanitize_dir_name(display_name);
-                let cam_dir = state.save_dir.join(&safe_dir).join(&date_part).join(".raw").join(&time_part);
-                if let Err(e) = tokio::fs::create_dir_all(&cam_dir).await {
-                    warn!(
-                        "[{camera_id}] failed to create session dir {}: {e}",
-                        cam_dir.display()
-                    );
-                } else {
-                    info!(
-                        "[{display_name}] motion START ({} changed pixels, threshold {}) session={}",
-                        changed, min_pixels, session
-                    );
-                    motion.saving = true;
-                    motion.session_dir = Some(session);
-                    motion.session_cam_dir = Some(safe_dir);
-                    motion.session_start_ms = now;
-
-                    if cfg.notifications_enabled {
-                        if let (Some(token), Some(chat_id)) =
-                            (state.telegram_token.clone(), state.telegram_chat_id.clone())
-                        {
-                            let frame = body.clone();
-                            let cam = camera_id.clone();
-                            let dn = display_name.to_string();
-                            tokio::spawn(async move {
-                                send_telegram_notification(&token, &chat_id, &cam, &dn, frame).await;
-                            });
-                        }
-                    }
-                }
-            } else {
-                debug!(
-                    "[{camera_id}] motion continuing ({} changed pixels)",
-                    changed
-                );
-            }
-            need_timeout_reset = true;
-        } else {
-            trace!(
-                "[{camera_id}] no motion ({} changed pixels, threshold {})",
-                changed,
-                min_pixels
-            );
-        }
-    }
-
-    if need_timeout_reset {
-        reset_motion_timeout(&mut motion, &state, &camera_id, &camera);
-    }
-
+    /* Save the frame if a motion session is active. The session-triggering
+       frame itself is saved by run_motion_check, since the session may not
+       exist yet by the time this runs. */
     if let Some(ref session) = motion.session_dir {
-        let dir = motion.session_cam_dir.as_deref().unwrap_or(&camera_id);
+        let dir = motion.session_cam_dir.as_deref().unwrap_or(camera_id);
         let (date_part, time_part) = session.split_once('_').unwrap_or((session.as_str(), "00-00-00"));
         let cam_dir = state.save_dir.join(dir).join(date_part).join(".raw").join(time_part);
         let path = cam_dir.join(format!("frame_{:06}.jpg", n));
         let data = body.clone();
-        let cam_id = camera_id.clone();
+        let cam_id = camera_id.to_string();
         let handle = tokio::spawn(async move {
             if let Err(e) = tokio::fs::write(&path, &data).await {
                 warn!("[{cam_id}] failed to save frame #{n}: {e}");
@@ -328,7 +327,121 @@ pub async fn handler_upload(
     drop(motion);
 
     let _ = camera.tx.send(body);
-    StatusCode::OK
+}
+
+/* Decode + motion detection for one frame, run off the upload response path.
+   Ordering against other frames is only loosely guaranteed: a check may
+   finish after the next frame has already arrived, in which case a later
+   comparison runs against an older reference frame — acceptable, it only
+   makes detection slightly more sensitive. */
+async fn run_motion_check(
+    state: AppState,
+    camera: CameraState,
+    camera_id: String,
+    cfg: CameraConfig,
+    prev_gray: Option<Vec<u8>>,
+    body: Bytes,
+    now: u64,
+    n: u64,
+) {
+    let threshold = cfg.pixel_threshold;
+    let had_prev = prev_gray.is_some();
+    let min_pixels =
+        ((COMPARE_WIDTH * COMPARE_HEIGHT) as f32 * cfg.motion_percent / 100.0) as u32;
+    let body_for_decode = body.clone();
+    let detection = tokio::task::spawn_blocking(move || {
+        let gray = process_frame(&body_for_decode)?;
+        let changed = match prev_gray {
+            Some(prev) => prev
+                .iter()
+                .zip(gray.iter())
+                .filter(|(a, b)| a.abs_diff(**b) > threshold)
+                .count() as u32,
+            None => 0,
+        };
+        let detected = had_prev && changed >= min_pixels;
+        Some((gray, changed, detected))
+    })
+    .await
+    .ok()
+    .flatten();
+
+    let Some((gray, changed, detected)) = detection else {
+        debug!("[{camera_id}] failed to decode frame for motion check");
+        return;
+    };
+
+    let mut motion = camera.motion.write().await;
+    motion.prev_gray = Some(gray);
+
+    if !detected {
+        trace!(
+            "[{camera_id}] no motion ({} changed pixels, threshold {})",
+            changed,
+            min_pixels
+        );
+        return;
+    }
+
+    motion.last_motion_ms = now;
+    if motion.saving {
+        debug!(
+            "[{camera_id}] motion continuing ({} changed pixels)",
+            changed
+        );
+    } else {
+        let now_dt = chrono::Local::now();
+        let date_part = now_dt.format("%d-%m-%Y").to_string();
+        let time_part = now_dt.format("%H-%M-%S").to_string();
+        let session = format!("{date_part}_{time_part}");
+        let display_name = cfg.name.as_deref().unwrap_or(&camera_id);
+        let safe_dir = sanitize_dir_name(display_name);
+        let cam_dir = state.save_dir.join(&safe_dir).join(&date_part).join(".raw").join(&time_part);
+        if let Err(e) = tokio::fs::create_dir_all(&cam_dir).await {
+            warn!(
+                "[{camera_id}] failed to create session dir {}: {e}",
+                cam_dir.display()
+            );
+        } else {
+            info!(
+                "[{display_name}] motion START ({} changed pixels, threshold {}) session={}",
+                changed, min_pixels, session
+            );
+            motion.saving = true;
+            motion.session_dir = Some(session);
+            motion.session_cam_dir = Some(safe_dir);
+            motion.session_start_ms = now;
+
+            /* The upload handler responded before this session existed, so
+               the triggering frame is saved here instead. */
+            let path = cam_dir.join(format!("frame_{:06}.jpg", n));
+            let data = body.clone();
+            let cam_id = camera_id.clone();
+            let handle = tokio::spawn(async move {
+                if let Err(e) = tokio::fs::write(&path, &data).await {
+                    warn!("[{cam_id}] failed to save frame #{n}: {e}");
+                } else {
+                    debug!("[{cam_id}] saved frame #{n} to {}", path.display());
+                }
+            });
+            motion.pending_saves.push(handle);
+
+            if cfg.notifications_enabled {
+                if let (Some(token), Some(chat_id)) =
+                    (state.telegram_token.clone(), state.telegram_chat_id.clone())
+                {
+                    let frame = body.clone();
+                    let cam = camera_id.clone();
+                    let dn = display_name.to_string();
+                    tokio::spawn(async move {
+                        send_telegram_notification(&token, &chat_id, &cam, &dn, frame).await;
+                    });
+                }
+            }
+        }
+    }
+
+    reset_motion_timeout(&mut motion, &state, &camera_id, &camera);
 }
 
 async fn get_or_register_camera(state: &AppState, camera_id: &str) -> CameraState {
@@ -556,25 +669,6 @@ pub async fn handler_delete_camera(
     });
 
     StatusCode::OK
-}
-
-pub async fn handler_firmware_version(State(state): State<AppState>) -> Response {
-    let Some(ref dir) = state.firmware_dir else {
-        return Response::builder()
-            .status(StatusCode::SERVICE_UNAVAILABLE)
-            .body(Body::from("FIRMWARE_DIR not configured"))
-            .unwrap();
-    };
-    match tokio::fs::read_to_string(dir.join("version")).await {
-        Ok(v) => Response::builder()
-            .header(header::CONTENT_TYPE, "text/plain")
-            .body(Body::from(v.trim().to_string()))
-            .unwrap(),
-        Err(_) => Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Body::empty())
-            .unwrap(),
-    }
 }
 
 pub async fn handler_firmware_binary(

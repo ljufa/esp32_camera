@@ -1,107 +1,106 @@
-# ESP32 Security Camera — Firmware
+# ESP32 Security Camera
 
-AI-Thinker ESP32-CAM (original ESP32, OV2640) firmware. Captures JPEG frames and POSTs them to a configurable HTTP endpoint. Supports PIR-triggered capture and OTA firmware updates.
+Security camera firmware that captures JPEG frames and POSTs them to the
+streaming server. One source tree supports multiple boards via per-board
+config files.
+
+## Supported boards
+
+| Board id  | Hardware                                                        |
+|-----------|-----------------------------------------------------------------|
+| `esp32cam`| Original ESP32 (AI-Thinker pinout, USB-C carrier), OV2640, 4 MB flash, quad PSRAM |
+| `esp32s3` | Freenove ESP32-S3-WROOM, OV2640 (OV5640 overheats on this board), 16 MB flash, 8 MB OPI PSRAM    |
+
+Board config lives in `sdkconfig.defaults.<board>` (target, flash, PSRAM,
+camera pins, partition table); shared settings in `sdkconfig.defaults`.
+Each board builds into its own `build.<board>/` directory with its own
+generated sdkconfig, so builds never interfere.
 
 ## Requirements
 
 - ESP-IDF >= 5.0
-- AI-Thinker ESP32-CAM (original ESP32 with PSRAM, OV2640)
 
-## Quick Start
-
-### 1. Configure
+## Build & Flash
 
 ```bash
-idf.py menuconfig
-# → Security Camera Configuration
-#   Set WiFi SSID/password, HTTP endpoint URL
-#   Set OTA version/firmware URLs
-#   Adjust camera pins if your board differs from defaults
+idf.py @boards/esp32cam.args build
+idf.py @boards/esp32s3.args build
+
+idf.py @boards/esp32cam.args -p /dev/ttyUSB0 flash monitor
 ```
 
-### 2. Build & Flash
+WiFi credentials, endpoint URL, OTA settings, and frame size/quality are
+Kconfig defaults (`main/Kconfig.projbuild`); tweak per checkout with
+`idf.py @boards/<board>.args menuconfig`.
 
-First flash must be a full flash (writes the OTA partition table):
+**Always go through `@boards/<board>.args`** — never run bare `idf.py build`
+or `idf.py set-target`. Bare invocations use a `sdkconfig` at the project
+root: `set-target` regenerates it (losing menuconfig-only values), and a
+stale root sdkconfig from another board silently drives chip detection, so
+you can end up with e.g. an esp32cam binary built for the S3 toolchain. If a
+root `sdkconfig`/`sdkconfig.old` ever appears, delete it.
 
-```bash
-idf.py build
-idf.py -p /dev/ttyUSB0 flash monitor
-```
+## Releasing (OTA)
 
-Subsequent updates can be pushed OTA — see the server README.
+1. Bump `PROJECT_VER` in `CMakeLists.txt`. Never skip a version — devices
+   only ever check for `v{current+1}`.
+2. Run `./release.sh` — builds every board and stages
+   `release/<board_type>_v<N>.bin`, which the server serves as
+   `FIRMWARE_DIR`.
+3. Devices check for the next version once at boot, so power-cycle (or wait
+   for the next natural reboot).
 
-## Project Structure
+### OTA limits
+
+- **OTA only replaces the app partition.** Bootloader-level settings — flash
+  frequency, flash size, anything in the bootloader image header — need one
+  flash over serial. Concretely: the 40→80 MHz flash-clock change (July 2026)
+  reaches the original `esp32cam` board only via serial; on the S3 the flash
+  clock was already 80 MHz, so it updates fully over the air. On the original
+  ESP32, 80 MHz PSRAM also depends on 80 MHz flash, so that speedup rides on
+  the same serial flash.
+- **Binary names use the sanitized board type** (non-alphanumerics → `_`,
+  matching the CMake project name), and since v5 `ota.c` sanitizes the same
+  way. Firmware v3/v4 on the S3 asked for the raw hyphenated name
+  (`esp32s3-freenove_v4.bin`) — `release/esp32s3-freenove_v4.bin` exists
+  (v5 content) purely so those devices can escape; new boards whose
+  `BOARD_TYPE` contains `-` don't need this.
+- **Devices more than one version behind need stepping stones.** A device at
+  v1 asks only for `_v2.bin` and gives up (404) if it's missing. Serve every
+  intermediate name; the *content* can simply be the newest build renamed —
+  the device flashes it, boots reporting the new (higher) version, and
+  continues from there. Example: `release/esp32s3_freenove_v2.bin` is a copy
+  of the v3 binary, placed so the S3 camera that shipped at v1 can reach v3.
+
+## Adding a board
+
+1. `sdkconfig.defaults.<name>` — target, flash size/clock, PSRAM mode,
+   `CONFIG_BOARD_TYPE`, camera pins, partition CSV name.
+2. `partitions_<name>.csv` — sized to the board's flash.
+3. `boards/<name>.args` — copy an existing one, replace the board name
+   everywhere.
+4. Add the name to the board loop in `release.sh`.
+
+`CONFIG_BOARD_TYPE` becomes both the OTA binary name and part of the device
+ID, and the CMake build reads it from the defaults file (via `-D CAM_BOARD`
+in the args file), so it stays consistent everywhere by construction.
+
+## Project structure
 
 ```
 firmware/
-├── CMakeLists.txt           # PROJECT_VER lives here
-├── sdkconfig.defaults       # ESP32 + PSRAM defaults
-├── partitions.csv           # OTA-aware partition table (ota_0 + ota_1)
-└── main/
-    ├── Kconfig.projbuild    # All runtime config (WiFi, pins, OTA, etc.)
-    ├── idf_component.yml    # Pulls in espressif/esp32-camera
-    ├── main.c               # Capture loop, PIR logic
-    ├── camera_init.c/h      # OV2640 init, sensor tweaks, retry logic
-    ├── wifi_connect.c/h     # WiFi STA with retry
-    ├── http_sender.c/h      # HTTP POST of JPEG frames (keep-alive)
-    ├── ota.c/h              # Poll-on-boot OTA update
-    ├── pir.c/h              # PIR motion sensor
-    └── device_id.c/h        # Stable device ID: <board>-<mac6>
+├── CMakeLists.txt               # PROJECT_VER + board-aware project name
+├── boards/<board>.args          # idf.py argument files (build dir, defaults)
+├── sdkconfig.defaults           # shared settings
+├── sdkconfig.defaults.<board>   # per-board target/flash/PSRAM/pins
+├── partitions_<board>.csv       # per-board partition tables
+├── release.sh                   # build all boards, stage OTA binaries
+├── release/                     # served by the server as FIRMWARE_DIR
+└── main/                        # C sources (board-independent)
 ```
 
-## Camera Pin Defaults (AI-Thinker ESP32-CAM)
+## Notes
 
-| Signal | GPIO |
-|--------|------|
-| PWDN   | 32   |
-| XCLK   | 0    |
-| SIOD   | 26   |
-| SIOC   | 27   |
-| D0–D7  | 5,18,19,21,36,39,34,35 |
-| VSYNC  | 25   |
-| HREF   | 23   |
-| PCLK   | 22   |
-
-Override in `menuconfig → Camera Pins` if your board differs.
-
-## Configuration Reference
-
-All options are under `menuconfig → Security Camera Configuration`.
-
-| Section | Key | Default | Description |
-|---------|-----|---------|-------------|
-| Device Identity | `BOARD_TYPE` | `esp32cam` | Board name prefix in device ID |
-| Status LED | `STATUS_LED_ENABLE` | y | Flash LED on GPIO4 while capturing |
-| PIR | `PIR_ENABLE` | y | Trigger capture on motion; disable for continuous |
-| PIR | `PIR_GPIO` | 16 | GPIO connected to PIR output |
-| WiFi | `WIFI_SSID` / `WIFI_PASSWORD` | — | Network credentials |
-| HTTP Endpoint | `HTTP_ENDPOINT_URL` | — | Base URL; camera ID appended automatically |
-| HTTP Endpoint | `HTTP_BASIC_AUTH_ENABLE` | n | Enable Basic Auth on upload |
-| OTA | `OTA_ENABLE` | y | Check for updates on every boot |
-| OTA | `OTA_VERSION_URL` | — | `GET` returns plain-text version string |
-| OTA | `OTA_FIRMWARE_URL` | — | URL of `.bin` to download on update |
-| Capture | `JPEG_QUALITY` | 10 | JPEG quality (lower = better, 4–63) |
-
-## Device ID
-
-Each device identifies itself as `<board>-<mac6>`, e.g. `esp32cam-a1b2c3`, derived from the board type config and the last 3 bytes of the factory eFuse MAC. This ID is stable across firmware updates and is appended to the upload URL: `POST /upload/esp32cam-a1b2c3`.
-
-## OTA Updates
-
-On every boot (after WiFi connects), the firmware GETs `OTA_VERSION_URL`. If the returned version string differs from the running firmware, it downloads `OTA_FIRMWARE_URL`, flashes it, and reboots. On failure it logs the error and continues normally.
-
-See the server README for how to publish a new firmware version.
-
-## Partition Table
-
-Uses an OTA-aware layout with two 1.5 MB app slots:
-
-| Partition | Size |
-|-----------|------|
-| nvs | 20 KB |
-| otadata | 8 KB |
-| ota_0 | 1.5 MB |
-| ota_1 | 1.5 MB |
-| spiffs | 960 KB |
-
-Current binary is ~1 MB, leaving ~512 KB of headroom per slot.
+- PSRAM is required; JPEG format keeps memory usage manageable alongside WiFi.
+- The sensor is initialized with vertical flip enabled — adjust in
+  `camera_init.c` if your image is upside down.

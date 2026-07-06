@@ -1,8 +1,4 @@
 #!/bin/sh
-set -a
-[ -f /run/container.env ] && . /run/container.env
-set +a
-
 RETAIN_DAYS=${RETAIN_DAYS:-7}
 SAVE_DIR=${SAVE_DIR:-/frames}
 

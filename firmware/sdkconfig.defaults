@@ -1,11 +1,9 @@
-# Target: original ESP32 (ESP-32S module, AI-Thinker ESP32-CAM pinout, USB-C board)
-CONFIG_IDF_TARGET="esp32"
+# Shared settings for all boards. Board-specific config (target, flash,
+# PSRAM, camera pins, partition table) lives in sdkconfig.defaults.<board>.
+# Build with: idf.py @boards/<board>.args build
 
-# Enable PSRAM (PSRAM64H on-board, required for JPEG capture + WiFi)
-CONFIG_ESP32_SPIRAM_SUPPORT=y
-CONFIG_SPIRAM=y
-CONFIG_SPIRAM_SPEED_40M=y
-CONFIG_SPIRAM_BOOT_INIT=y
+# Max CPU clock
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 # Increase main task stack for HTTP + camera ops
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
@@ -19,7 +17,12 @@ CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=8
 
-# Custom partition table (3 MB app, fits camera driver + WiFi + HTTP)
+# TCP buffers sized so a whole JPEG frame (~30-45 KB) fits in the send buffer;
+# with the 5760 B default a frame needs ~7 window round-trips over the WAN path
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65534
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+
+# Custom partition table (per-board CSV set in sdkconfig.defaults.<board>)
 CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_OFFSET=0x8000

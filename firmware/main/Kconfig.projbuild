@@ -6,48 +6,13 @@ menu "Security Camera Configuration"
             default "esp32cam"
             help
                 Short board name baked into the device ID. Examples:
-                "esp32cam", "esp32s3-usbc", "esp32cam-pir".
+                "esp32cam", "esp32s3-freenove", "esp32cam-pir".
 
                 The full device ID assembled at boot is:
                     <board>-<mac6>-<fwver>
                 e.g. "esp32cam-a1b2c3-0.2.0", where mac6 is the last
                 3 bytes of the factory eFuse MAC and fwver comes from
                 PROJECT_VER in CMakeLists.txt.
-    endmenu
-
-    menu "Status LED"
-        config STATUS_LED_ENABLE
-            bool "Enable flash LED when capture is active"
-            default y
-
-        config STATUS_LED_GPIO
-            int "On-board LED GPIO pin (active HIGH)"
-            default 4
-            depends on STATUS_LED_ENABLE
-            help
-                GPIO4 is the white flash LED on AI-Thinker ESP32-CAM boards.
-                LED turns ON while capturing (PIR-triggered or continuous).
-    endmenu
-
-    menu "PIR Motion Sensor"
-        config PIR_ENABLE
-            bool "Enable PIR motion sensor (disable to stream continuously)"
-            default y
-            help
-                When enabled, the camera only captures while motion is detected.
-                When disabled, the camera streams frames continuously at the
-                configured capture interval.
-
-        config PIR_GPIO
-            int "PIR sensor GPIO pin"
-            default 16
-            depends on PIR_ENABLE
-            help
-                GPIO connected to PIR sensor output (active HIGH).
-                GPIO16 (RXD2) is free on AI-Thinker ESP32-CAM when SD card
-                is not used. Avoid GPIO12/13 (SD DATA2/3 — board pull-ups on
-                those lines conflict with internal pull-downs and disrupt camera DMA).
-
     endmenu
 
     menu "WiFi"
@@ -84,7 +49,7 @@ menu "Security Camera Configuration"
 
         config HTTP_BASIC_AUTH_ENABLE
             bool "Enable HTTP Basic Authentication"
-            default n
+            default y
 
         config HTTP_BASIC_AUTH_USERNAME
             string "Username"
@@ -93,7 +58,7 @@ menu "Security Camera Configuration"
 
         config HTTP_BASIC_AUTH_PASSWORD
             string "Password"
-            default ""
+            default "changeme"
             depends on HTTP_BASIC_AUTH_ENABLE
     endmenu
 
@@ -102,21 +67,32 @@ menu "Security Camera Configuration"
             bool "Enable OTA firmware updates on boot"
             default y
 
-        config OTA_VERSION_URL
-            string "Version check URL"
-            default "http://192.168.1.100:8080/firmware/version"
-            depends on OTA_ENABLE
-            help
-                GET this URL on boot. Server must return a plain-text version
-                string (e.g. "0.3.0"). If it differs from the running firmware,
-                the binary is downloaded and flashed.
-
         config OTA_FIRMWARE_URL
-            string "Firmware binary URL"
-            default "http://192.168.1.100:8080/firmware/esp32_security_camera.bin"
+            string "Firmware base URL"
+            default "changeme"
             depends on OTA_ENABLE
             help
-                URL of the firmware .bin file to download when an update is available.
+                Base URL of the firmware directory. The device tries to GET:
+                  <url>/<board>_v<N+1>.bin
+                where N is the running version (integer). If 200 → update.
+                If 404 → up to date. Server just hosts all versioned binaries.
+
+                Board type is set under Device Identity → Board type identifier.
+
+        config OTA_BASIC_AUTH_ENABLE
+            bool "Enable HTTP Basic Authentication for OTA endpoints"
+            default y
+            depends on OTA_ENABLE
+
+        config OTA_BASIC_AUTH_USERNAME
+            string "Username"
+            default "camera"
+            depends on OTA_BASIC_AUTH_ENABLE
+
+        config OTA_BASIC_AUTH_PASSWORD
+            string "Password"
+            default "camera"
+            depends on OTA_BASIC_AUTH_ENABLE
     endmenu
 
     menu "Capture"
@@ -124,9 +100,19 @@ menu "Security Camera Configuration"
             int "JPEG quality (lower = better, higher compression)"
             default 10
             range 4 63
+
+        config FRAME_SIZE
+            int "Frame size (framesize_t enum value)"
+            default 9
+            range 0 13
+            help
+                Camera capture resolution as framesize_t index.
+                0=96x96, 1=QQVGA 160x120, 5=QVGA 320x240,
+                8=VGA 640x480, 9=SVGA 800x600 (default),
+                10=XGA 1024x768, 12=SXGA 1280x1024, 13=UXGA 1600x1200
     endmenu
 
-    menu "Camera Pins (AI-Thinker ESP32-CAM / OV3660 defaults)"
+    menu "Camera Pins (per-board values live in sdkconfig.defaults.<board>)"
         config CAM_PIN_PWDN
             int "PWDN pin (-1 if unused)"
             default 32

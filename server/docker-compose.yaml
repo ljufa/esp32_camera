@@ -1,24 +1,24 @@
 services:
   camera-server:
     build: .
-    user: "1000:1000"
     environment:
       - SERVER_BIND_ADDRESS=0.0.0.0:8080
-      - RUST_LOG=esp32_camera_server=info,tower_http=info
+      - RUST_LOG=esp32_camera_server=error,tower_http=error
       - SAVE_DIR=/frames
       - DB_DIR=/db
       - FIRMWARE_DIR=/firmware
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - PUBLIC_STREAM_URL=${PUBLIC_STREAM_URL}
       - MOTION_TIMEOUT_MS=10000
       - PIXEL_THRESHOLD=80
       - MOTION_CHECK_EVERY=5
       - MOTION_PERCENT=3.0
       - RETAIN_DAYS=3
-      - CLEANUP_CRON=*/20 * * * *
+      - CLEANUP_CRON=*/10 * * * *
     volumes:
       - ./frames:/frames
-      - ../firmware/build:/firmware:ro
+      - ../firmware/release:/firmware:ro
       - camera-db:/db
       - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
@@ -32,17 +32,24 @@ services:
       - "traefik.enable=true"
       - "traefik.http.middlewares.camerastream.basicauth.users=${TRAEFIK_BASIC_AUTH_USERS}"
       - "traefik.http.middlewares.cameraui.basicauth.users=${TRAEFIK_UI_BASIC_AUTH_USERS}"
+      - "traefik.http.middlewares.cameraota.basicauth.users=${TRAEFIK_OTA_BASIC_AUTH_USERS}"
       - "traefik.http.routers.camera.rule=Host(`${TRAEFIK_HOST}`)"
       - "traefik.http.routers.camera.entrypoints=websecure"
       - "traefik.http.routers.camera.tls.certresolver=cameradnschallenge"
       - "traefik.http.services.camera.loadbalancer.server.port=8080"
       - "traefik.http.routers.camera.middlewares=cameraui"
+      # NOTE: firmware >= v5 uploads via one endless chunked POST. Traefik's
+      # entrypoint readTimeout (60s default in v3) must be 0 on this
+      # entrypoint or every stream is cut after a minute:
+      #   --entrypoints.web.transport.respondingTimeouts.readTimeout=0s
+      # Never add a buffering middleware to this router.
       - "traefik.http.routers.camera-upload.rule=Host(`${TRAEFIK_HOST}`) && PathPrefix(`/upload`)"
       - "traefik.http.routers.camera-upload.entrypoints=web"
       - "traefik.http.routers.camera-upload.middlewares=camerastream"
       - "traefik.http.routers.camera-upload.service=camera"
       - "traefik.http.routers.camera-firmware.rule=Host(`${TRAEFIK_HOST}`) && PathPrefix(`/firmware`)"
       - "traefik.http.routers.camera-firmware.entrypoints=web"
+      - "traefik.http.routers.camera-firmware.middlewares=cameraota"
       - "traefik.http.routers.camera-firmware.service=camera"
 
   filebrowser:

@@ -75,9 +75,12 @@ static esp_err_t camera_init_once(void)
         .ledc_channel   = LEDC_CHANNEL_0,
 
         .pixel_format   = PIXFORMAT_JPEG,
-        .frame_size     = FRAMESIZE_XGA,
+        .frame_size     = CONFIG_FRAME_SIZE,
         .jpeg_quality   = CONFIG_JPEG_QUALITY,
-        .fb_count       = 2,
+        /* 3 buffers: one being sent, one queued, one free for the driver —
+           a stalled upload (dead connection, slow WAN) then drops frames
+           instead of starving capture ("Failed to get frame: timeout"). */
+        .fb_count       = 3,
         .fb_location    = CAMERA_FB_IN_PSRAM,
         .grab_mode      = CAMERA_GRAB_LATEST,
     };
@@ -106,7 +109,7 @@ esp_err_t camera_init(void)
                 sensor->set_bpc(sensor, 1);
                 sensor->set_wpc(sensor, 1);
                 sensor->set_lenc(sensor, 1);
-                sensor->set_raw_gma(sensor, 1);                
+                sensor->set_raw_gma(sensor, 1);
             }
             ESP_LOGI(TAG, "Camera ready (attempt %d)", attempt);
             return ESP_OK;

@@ -8,75 +8,85 @@
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_app_desc.h"
-#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <ctype.h>
 
 static const char *TAG = "ota";
 
-static bool fetch_server_version(char *buf, size_t buf_len)
-{
-    esp_http_client_config_t config = {
-        .url             = CONFIG_OTA_VERSION_URL,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .timeout_ms      = 10000,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) return false;
-
-    bool ok = false;
-    if (esp_http_client_open(client, 0) == ESP_OK) {
-        esp_http_client_fetch_headers(client);
-        int status = esp_http_client_get_status_code(client);
-        if (status == 200) {
-            int n = esp_http_client_read(client, buf, (int)buf_len - 1);
-            if (n > 0) {
-                buf[n] = '\0';
-                for (int i = n - 1; i >= 0 && (unsigned char)buf[i] <= ' '; i--) {
-                    buf[i] = '\0';
-                }
-                ok = (buf[0] != '\0');
-            }
-        } else {
-            ESP_LOGW(TAG, "Version check returned HTTP %d", status);
-        }
-    }
-    esp_http_client_cleanup(client);
-    return ok;
-}
-
 void ota_check_and_update(void)
 {
-    char server_ver[32] = {0};
-    if (!fetch_server_version(server_ver, sizeof(server_ver))) {
-        ESP_LOGW(TAG, "Version check failed — skipping OTA");
+    const char *current_ver_str = esp_app_get_description()->version;
+    long current_ver = strtol(current_ver_str, NULL, 10);
+
+    /* Binary names come from the CMake project name, which sanitizes
+       BOARD_TYPE (non-alphanumerics → '_'); mirror that here or a board
+       type like "esp32s3-freenove" requests a file that never exists. */
+    char board[64];
+    snprintf(board, sizeof(board), "%s", CONFIG_BOARD_TYPE);
+    for (char *p = board; *p; p++) {
+        if (!isalnum((unsigned char)*p)) *p = '_';
+    }
+
+    char url[256];
+    snprintf(url, sizeof(url), "%s/%s_v%ld.bin",
+             CONFIG_OTA_FIRMWARE_URL, board, current_ver + 1);
+    ESP_LOGI(TAG, "Checking OTA: %s", url);
+
+    esp_http_client_config_t config = {
+        .url               = url,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .timeout_ms        = 10000,
+#if CONFIG_OTA_BASIC_AUTH_ENABLE
+        .username          = CONFIG_OTA_BASIC_AUTH_USERNAME,
+        .password          = CONFIG_OTA_BASIC_AUTH_PASSWORD,
+        .auth_type         = HTTP_AUTH_TYPE_BASIC,
+#endif
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) return;
+
+    esp_err_t ret = esp_http_client_open(client, 0);
+    if (ret != ESP_OK) {
+        esp_http_client_cleanup(client);
+        ESP_LOGI(TAG, "No update (v%ld not reachable)", current_ver + 1);
+        return;
+    }
+    esp_http_client_fetch_headers(client);
+    int status = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+
+    if (status == 404) {
+        ESP_LOGI(TAG, "Up to date (v%ld)", current_ver);
+        return;
+    }
+    if (status != 200) {
+        ESP_LOGW(TAG, "OTA check returned HTTP %d", status);
         return;
     }
 
-    const char *current_ver = esp_app_get_description()->version;
-    ESP_LOGI(TAG, "Firmware: current=%s server=%s", current_ver, server_ver);
+    ESP_LOGI(TAG, "Updating v%ld → v%ld", current_ver, current_ver + 1);
 
-    if (strcmp(server_ver, current_ver) == 0) {
-        ESP_LOGI(TAG, "Already up to date");
-        return;
-    }
-
-    ESP_LOGI(TAG, "Updating to %s from %s", server_ver, CONFIG_OTA_FIRMWARE_URL);
-
-    esp_http_client_config_t http_config = {
-        .url               = CONFIG_OTA_FIRMWARE_URL,
+    esp_http_client_config_t ota_http = {
+        .url               = url,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .timeout_ms        = 60000,
-        .keep_alive_enable = true,
+#if CONFIG_OTA_BASIC_AUTH_ENABLE
+        .username          = CONFIG_OTA_BASIC_AUTH_USERNAME,
+        .password          = CONFIG_OTA_BASIC_AUTH_PASSWORD,
+        .auth_type         = HTTP_AUTH_TYPE_BASIC,
+#endif
     };
     esp_https_ota_config_t ota_config = {
-        .http_config = &http_config,
+        .http_config = &ota_http,
     };
 
-    esp_err_t ret = esp_https_ota(&ota_config);
+    ret = esp_https_ota(&ota_config);
     if (ret == ESP_OK) {
         ESP_LOGI(TAG, "OTA complete — rebooting");
         esp_restart();
     } else {
-        ESP_LOGE(TAG, "OTA failed: %s — continuing with current firmware", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "OTA failed: %s", esp_err_to_name(ret));
     }
 }
 

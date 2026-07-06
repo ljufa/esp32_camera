@@ -39,6 +39,8 @@ pub struct CameraState {
     pub next_viewer_id: Arc<AtomicU64>,
     pub motion: Arc<RwLock<MotionTracker>>,
     pub config: Arc<RwLock<CameraConfig>>,
+    /* Reported by the device in the X-Firmware-Version header on upload */
+    pub fw_version: Arc<RwLock<Option<String>>>,
 }
 
 #[derive(Clone)]
@@ -73,6 +75,7 @@ pub struct CameraStatus {
     pub active: bool,
     pub frame_count: u64,
     pub fps: f32,
+    pub fw_version: Option<String>,
     pub viewer_count: usize,
     pub viewers: Vec<String>,
     pub motion_enabled: bool,
@@ -112,6 +115,7 @@ impl CameraState {
                 pending_saves: Vec::new(),
             })),
             config: Arc::new(RwLock::new(config)),
+            fw_version: Arc::new(RwLock::new(None)),
         }
     }
 }

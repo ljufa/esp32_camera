@@ -4,11 +4,10 @@ script = [
 ]
 
 [tasks.package-firmware]
-description = "Write version file into firmware/build/ so it can be committed alongside the binary"
+description = "List firmware binaries available in release/"
 script = [
-    "VER=$(grep 'set(PROJECT_VER' ../firmware/CMakeLists.txt | sed 's/.*\"\\(.*\\)\".*/\\1/')",
-    "printf '%s' \"$VER\" > ../firmware/build/version",
-    "echo \"Packaged firmware $VER\""
+    "echo 'Firmware binaries ready for deployment:'",
+    "ls -lh ../firmware/release/*.bin 2>/dev/null || echo '  (none found — build firmware first)'"
 ]
 
 [tasks.redeploy]

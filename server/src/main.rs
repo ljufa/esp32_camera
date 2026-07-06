@@ -100,9 +100,9 @@ async fn main() {
         .route("/status.json", get(handlers::handler_status))
         .route("/stream/:camera_id", get(handlers::handler_stream))
         .route("/upload/:camera_id", post(handlers::handler_upload))
+        .route("/upload/:camera_id/stream", post(handlers::handler_upload_stream))
         .route("/api/camera/:camera_id/config", patch(handlers::handler_update_config))
         .route("/api/camera/:camera_id", delete(handlers::handler_delete_camera))
-        .route("/firmware/version", get(handlers::handler_firmware_version))
         .route("/firmware/:filename", get(handlers::handler_firmware_binary))
         .layer(
             ServiceBuilder::new()

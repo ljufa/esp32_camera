@@ -1,0 +1,4 @@
+-B build.esp32cam
+-D SDKCONFIG=build.esp32cam/sdkconfig
+-D SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.esp32cam
+-D CAM_BOARD=esp32cam

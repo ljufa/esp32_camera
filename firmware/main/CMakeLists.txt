@@ -4,11 +4,11 @@ idf_component_register(
         "camera_init.c"
         "wifi_connect.c"
         "http_sender.c"
-        "pir.c"
         "device_id.c"
         "ota.c"
     INCLUDE_DIRS "."
     REQUIRES
+        esp_timer
         esp_wifi
         esp_event
         esp_netif

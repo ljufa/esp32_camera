@@ -14,10 +14,15 @@ pub async fn send_telegram_notification(
 ) {
     let client = reqwest::Client::new();
 
-    let caption = format!(
-        "\u{26a0}\u{fe0f} <b>Motion on {}</b>\n\n<a href=\"https://stream.dlj.freemyip.com\">\u{1f510} Open stream</a>",
-        display_name,
-    );
+    /* Dashboard link comes from the environment so the deployment URL is
+       never hardcoded; without it the caption has no link. */
+    let caption = match std::env::var("PUBLIC_STREAM_URL") {
+        Ok(url) => format!(
+            "\u{26a0}\u{fe0f} <b>Motion on {}</b>\n\n<a href=\"{}\">\u{1f510} Open stream</a>",
+            display_name, url,
+        ),
+        Err(_) => format!("\u{26a0}\u{fe0f} <b>Motion on {}</b>", display_name),
+    };
 
     let photo_part = reqwest::multipart::Part::bytes(frame.to_vec())
         .file_name("motion.jpg")

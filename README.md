@@ -1,15 +1,15 @@
 # ESP32 Security Camera
 
-A minimal, self-hosted security camera system built around an AI-Thinker ESP32-CAM (original ESP32, OV2640). The firmware streams JPEG frames over HTTP to a lightweight Rust server that handles live viewing, software motion detection, video encoding, and optional Telegram notifications.
+A minimal, self-hosted security camera system supporting the AI-Thinker ESP32-CAM (original ESP32) and Freenove ESP32-S3, both with OV2640. The firmware streams JPEG frames over HTTP to a lightweight Rust server that handles live viewing, software motion detection, video encoding, and optional Telegram notifications.
 
 ```
-┌─────────────────────┐        HTTP POST /upload/<id>       ┌──────────────────────────┐
-│  ESP32-CAM firmware │  ──────────────────────────────►    │  Rust server (Docker)    │
+┌─────────────────────┐   chunked POST /upload/<id>/stream  ┌──────────────────────────┐
+│  ESP32 firmware     │  ──────────────────────────────►    │  Rust server (Docker)    │
 │                     │                                     │                          │
 │  • OV2640 capture   │                                     │  • Live MJPEG streams    │
-│  • PIR wake-up      │                                     │  • Motion detection      │
+│  • Multi-board      │                                     │  • Motion detection      │
 │  • OTA updates      │                                     │  • MP4 encoding (ffmpeg) │
-│  • HTTP keep-alive  │                                     │  • Telegram alerts       │
+│  • Streaming upload │                                     │  • Telegram alerts       │
 └─────────────────────┘                                     │  • Web dashboard         │
                                                             └──────────────────────────┘
 ```
